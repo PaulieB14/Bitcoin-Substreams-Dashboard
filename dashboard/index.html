@@ -140,18 +140,22 @@
                 // Get the array buffer
                 const arrayBuffer = await response.arrayBuffer();
                 
+                // Initialize parquet-wasm
+                await parquet_wasm.init();
+                
                 // Parse the Parquet file
-                const parquet = await parquet_wasm.readParquet(new Uint8Array(arrayBuffer));
+                const parquet = await parquet_wasm.ParquetReader.openBuffer(new Uint8Array(arrayBuffer));
                 
                 // Convert to JavaScript objects
                 const data = [];
-                const numRows = parquet.getRowCount();
-                const schema = parquet.getSchema();
+                const numRows = parquet.rowCount;
+                const schema = parquet.schema.fields;
                 
                 for (let i = 0; i < numRows; i++) {
                     const row = {};
                     for (const field of schema) {
-                        row[field.name] = parquet.getField(field.name, i);
+                        const col = parquet.getColumn(field.name);
+                        row[field.name] = col.getValue(i);
                     }
                     data.push(row);
                 }
