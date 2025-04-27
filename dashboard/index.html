@@ -6,7 +6,8 @@
     <title>Bitcoin Activity Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@9.0.0/Arrow.es5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/parquet-wasm@0.4.0/parquet_wasm.min.js"></script>
     <style>
         body {
             background-color: #f8f9fa;
@@ -119,34 +120,121 @@
     </div>
 
     <script>
-        // Function to load CSV data
-        async function loadCSV(file) {
-            return new Promise((resolve, reject) => {
-                Papa.parse(`./data/${file}.csv`, {
-                    download: true,
-                    header: true,
-                    skipEmptyLines: true,
-                    complete: function(results) {
-                        if (results.data && results.data.length > 0) {
-                            // Filter out any empty objects
-                            const filteredData = results.data.filter(item => 
-                                Object.keys(item).length > 0 && 
-                                !Object.keys(item).every(key => item[key] === "")
-                            );
-                            resolve(filteredData);
-                        } else {
-                            // If no valid data, provide a sample
-                            console.warn(`No valid data found in ${file}.csv, using sample data`);
-                            resolve([{block_height: "0", value: "0"}]);
-                        }
-                    },
-                    error: function(error) {
-                        console.error(`Error parsing ${file}.csv:`, error);
-                        // Provide sample data on error
-                        resolve([{block_height: "0", value: "0"}]);
+        // Function to load Parquet data
+        async function loadParquet(file) {
+            try {
+                // Define paths for different data types
+                let path;
+                if (file === 'block_times' || file === 'congestion') {
+                    path = `../data/block_meta/block_meta.parquet`;
+                } else {
+                    path = `../data/transactions/transactions.parquet`;
+                }
+                
+                // Fetch the Parquet file
+                const response = await fetch(path);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch ${path}: ${response.statusText}`);
+                }
+                
+                // Get the array buffer
+                const arrayBuffer = await response.arrayBuffer();
+                
+                // Parse the Parquet file
+                const parquet = await parquet_wasm.readParquet(new Uint8Array(arrayBuffer));
+                
+                // Convert to JavaScript objects
+                const data = [];
+                const numRows = parquet.getRowCount();
+                const schema = parquet.getSchema();
+                
+                for (let i = 0; i < numRows; i++) {
+                    const row = {};
+                    for (const field of schema) {
+                        row[field.name] = parquet.getField(field.name, i);
                     }
-                });
-            });
+                    data.push(row);
+                }
+                
+                // Process data based on the file type
+                switch (file) {
+                    case 'block_times':
+                        return data.map(row => ({
+                            block_height: row.block_height,
+                            block_timestamp: row.timestamp || row.block_timestamp
+                        }));
+                    case 'congestion':
+                        return data.map(row => ({
+                            block_height: row.block_height,
+                            transaction_count: row.transaction_count
+                        }));
+                    case 'fee_per_block':
+                        // Aggregate fees by block height
+                        const feesByBlock = {};
+                        data.forEach(row => {
+                            const blockHeight = row.block_height;
+                            const fee = row.fee || 0;
+                            if (!feesByBlock[blockHeight]) {
+                                feesByBlock[blockHeight] = 0;
+                            }
+                            feesByBlock[blockHeight] += fee;
+                        });
+                        return Object.entries(feesByBlock).map(([block_height, total_fees]) => ({
+                            block_height,
+                            total_fees
+                        }));
+                    case 'top_sending_addresses':
+                        // Count transactions by input address
+                        const senderCounts = {};
+                        data.forEach(row => {
+                            if (row.input_addresses) {
+                                row.input_addresses.forEach(addr => {
+                                    if (!senderCounts[addr]) {
+                                        senderCounts[addr] = 0;
+                                    }
+                                    senderCounts[addr]++;
+                                });
+                            }
+                        });
+                        return Object.entries(senderCounts)
+                            .map(([input_address, tx_sent]) => ({ input_address, tx_sent }))
+                            .sort((a, b) => b.tx_sent - a.tx_sent)
+                            .slice(0, 10);
+                    case 'top_receiving_addresses':
+                        // Count transactions by output address
+                        const receiverCounts = {};
+                        data.forEach(row => {
+                            if (row.output_addresses) {
+                                row.output_addresses.forEach(addr => {
+                                    if (!receiverCounts[addr]) {
+                                        receiverCounts[addr] = 0;
+                                    }
+                                    receiverCounts[addr]++;
+                                });
+                            }
+                        });
+                        return Object.entries(receiverCounts)
+                            .map(([output_address, tx_received]) => ({ output_address, tx_received }))
+                            .sort((a, b) => b.tx_received - a.tx_received)
+                            .slice(0, 10);
+                    case 'top_transactions':
+                        // Get top transactions by value
+                        return data
+                            .sort((a, b) => (b.total_input_value || 0) - (a.total_input_value || 0))
+                            .slice(0, 10)
+                            .map(row => ({
+                                block_height: row.block_height,
+                                transaction_hash: row.hash,
+                                total_input_value: row.total_input_value || 0
+                            }));
+                    default:
+                        return data;
+                }
+            } catch (error) {
+                console.error(`Error loading Parquet data for ${file}:`, error);
+                // Return sample data on error
+                return [{block_height: "0", value: "0"}];
+            }
         }
 
         // Function to format timestamp
@@ -162,13 +250,13 @@
         // Initialize charts when DOM is loaded
         document.addEventListener('DOMContentLoaded', async function() {
             try {
-                // Load data
-                const blockTimes = await loadCSV('block_times');
-                const congestion = await loadCSV('congestion');
-                const feePerBlock = await loadCSV('fee_per_block');
-                const topSendingAddresses = await loadCSV('top_sending_addresses');
-                const topReceivingAddresses = await loadCSV('top_receiving_addresses');
-                const topTransactions = await loadCSV('top_transactions');
+                // Load data directly from Parquet files
+                const blockTimes = await loadParquet('block_times');
+                const congestion = await loadParquet('congestion');
+                const feePerBlock = await loadParquet('fee_per_block');
+                const topSendingAddresses = await loadParquet('top_sending_addresses');
+                const topReceivingAddresses = await loadParquet('top_receiving_addresses');
+                const topTransactions = await loadParquet('top_transactions');
 
                 // Blocks Over Time Chart
                 const blockTimesCtx = document.getElementById('blockTimesChart').getContext('2d');
@@ -283,7 +371,7 @@
 
             } catch (error) {
                 console.error('Error loading data:', error);
-                alert('Error loading data. Please make sure the CSV files are available.');
+                alert('Error loading data. Please make sure the Parquet files are available in the data directory.');
             }
         });
     </script>

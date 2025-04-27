@@ -16,17 +16,18 @@ The dashboard tracks approximately 3 months of data (~14,000 blocks) to keep the
 
 ## Current Status
 
-The project is currently in a **prototype stage** with the following components working:
+The project is currently in a **functional stage** with the following components working:
 
 - ✅ Dashboard UI with Chart.js visualizations
-- ✅ Sample data generation for testing
+- ✅ Substreams integration for Bitcoin data processing
 - ✅ Local HTTP server for viewing the dashboard
 - ✅ Scripts for checking Bitcoin block height
 - ✅ Configuration for Hetzner deployment
+- ✅ GitHub repository setup
+- ✅ Progress monitoring for Substreams processing
 
 The following components are **in progress**:
 
-- ⏳ Substreams integration for Bitcoin data processing
 - ⏳ Parquet file generation from Substreams output
 - ⏳ DuckDB queries for data analysis
 
@@ -51,7 +52,7 @@ bitcoin-dashboard/
 │   └── build-custom-module.sh # Script to build a custom Substreams module
 ├── dashboard/                 # Dashboard files
 │   ├── index.html             # Dashboard HTML
-│   └── data/                  # CSV files for the dashboard
+│   └── data/                  # Directory for dashboard data (empty, used for backward compatibility)
 ├── .env                       # Environment variables (API keys)
 ├── .gitignore                 # Git ignore file
 └── README.md                  # This file
@@ -101,12 +102,11 @@ bitcoin-dashboard/
 
 ### Quick Start
 
-To run the dashboard with sample data:
+To run the dashboard with real Bitcoin data:
 
 ```bash
 cd scripts
-./run-substreams.sh  # Creates sample data
-./run-dashboard.sh   # Starts HTTP server and opens dashboard
+./run-all.sh  # Runs all steps in sequence
 ```
 
 ### Individual Steps
@@ -118,16 +118,29 @@ cd scripts
 ./check-block-height.sh
 ```
 
-#### 2. Generate Sample Data (Currently)
+#### 2. Fetch Real Bitcoin Data Using Substreams
 
 ```bash
 cd scripts
 ./run-substreams.sh
 ```
 
-This script currently:
-- Creates sample CSV files for testing the dashboard
-- Provides information about the planned workflow with Substreams and Parquet files
+This script:
+- Fetches real Bitcoin data using Substreams
+- Processes ~3 months of Bitcoin blocks
+- Converts JSON output to Parquet files
+
+#### 3. Monitor the Progress of the Substreams Process
+
+```bash
+cd scripts
+./monitor-progress.sh
+```
+
+This script:
+- Checks if the Substreams process is running
+- Displays the size of the output files
+- Shows the status of the dashboard data files
 
 #### 3. View the Dashboard
 
@@ -141,14 +154,15 @@ This script:
 - Opens the dashboard in your default browser
 - Displays the sample data in various charts and tables
 
-### Future Implementation
+### Current Implementation
 
-Once the Substreams integration is complete, the workflow will be:
+The current workflow is:
 
-1. Use Substreams to process Bitcoin blockchain data
-2. Store the data in Parquet files
-3. Query the Parquet files with DuckDB to generate CSV files
-4. Display the data in the dashboard
+1. Use Substreams to process Bitcoin blockchain data (in progress)
+2. Store the data in Parquet files (in progress)
+3. Display the data directly from Parquet files in the dashboard (complete)
+
+The Substreams process is currently running and processing ~3 months of Bitcoin blocks. Once it completes, the data will be converted to Parquet files and displayed directly in the dashboard without the need for intermediate CSV files.
 
 ### Custom Module Development
 
@@ -213,6 +227,32 @@ cd /mnt/data/bitcoin-dashboard/scripts
 - Add tagging of known whale wallets or exchanges
 - Aggregate by day instead of block for even smaller datasets
 - Extend the custom Substreams module with additional features
+
+## Tips for Building Bitcoin Substreams
+
+- **No need for Substreams stores** (`store_set`, `store_add`, etc.)
+    
+    ➔ *We're just mapping events and blocks, not aggregating in the Substreams itself.*
+    
+- **No need to convert to String or Hex manually**
+    
+    ➔ *Keep data as `bytes` — easier, lighter, and faster.*
+    
+- **No need to hard-code any contracts**
+    
+    ➔ *Bitcoin doesn't use smart contracts the way Ethereum does — just process all transactions/events as valid.*
+    
+- **No on-chain storage needed**
+    
+    ➔ *Substreams module just emits flat data; storage and aggregation will happen downstream.*
+    
+- **Focus purely on emitting clean event or transaction data**
+    
+    ➔ *Substreams streams → store raw outputs into Parquet (or Clickhouse if scaling later).*
+    
+- **Use DuckDB (or Clickhouse) to handle all aggregation later**
+    
+    ➔ *You can build SQL views, aggregates, and dashboards without touching the Substreams after it emits.*
 
 ## License
 

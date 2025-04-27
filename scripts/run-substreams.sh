@@ -110,12 +110,34 @@ import json
 import os
 
 try:
-    # Load JSON data
+    # Load JSON data line by line
+    block_meta_data = []
     with open("/tmp/block_meta.json", "r") as f:
-        data = json.load(f)
+        for line in f:
+            try:
+                obj = json.loads(line)
+                if "@data" in obj:
+                    # Extract the data from the @data field
+                    data = obj["@data"]
+                    # Add the block number
+                    data["block_height"] = obj["@block"]
+                    # Add timestamp if available
+                    if "timestamp" in obj:
+                        data["block_timestamp"] = obj["timestamp"]
+                    # Add transaction count if available
+                    if "transaction_count" in obj:
+                        data["transaction_count"] = obj["transaction_count"]
+                    block_meta_data.append(data)
+            except json.JSONDecodeError:
+                # Skip invalid lines
+                continue
 
     # Convert to DataFrame
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(block_meta_data)
+    
+    # Print DataFrame info for debugging
+    print("Block metadata DataFrame columns:", df.columns.tolist())
+    print("Block metadata DataFrame shape:", df.shape)
 
     # Save as Parquet
     df.to_parquet("data/block_meta/block_meta.parquet")
@@ -136,12 +158,28 @@ import json
 import os
 
 try:
-    # Load JSON data
+    # Load JSON data line by line
+    transactions_data = []
     with open("/tmp/transactions.json", "r") as f:
-        data = json.load(f)
+        for line in f:
+            try:
+                obj = json.loads(line)
+                if "@data" in obj:
+                    # Extract the data from the @data field
+                    data = obj["@data"]
+                    # Add the block number
+                    data["block_height"] = obj["@block"]
+                    transactions_data.append(data)
+            except json.JSONDecodeError:
+                # Skip invalid lines
+                continue
 
     # Convert to DataFrame
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(transactions_data)
+    
+    # Print DataFrame info for debugging
+    print("Transactions DataFrame columns:", df.columns.tolist())
+    print("Transactions DataFrame shape:", df.shape)
 
     # Save as Parquet
     df.to_parquet("data/transactions/transactions.parquet")
@@ -157,77 +195,8 @@ except Exception as e:
 # Deactivate the virtual environment
 deactivate
 
-# Step 4: Query Parquet files with DuckDB to generate CSV files
-echo "Step 4: Querying Parquet files with DuckDB..."
+# Create dashboard data directory if it doesn't exist
+mkdir -p dashboard/data
 
-# Average fees per block
-echo "Generating avg_fees.csv..."
-duckdb -c "
-SELECT AVG(fee) AS avg_fees
-FROM read_parquet('data/transactions/*.parquet');
-" > dashboard/data/avg_fees.csv
-
-# Top 10 largest BTC transactions
-echo "Generating top_transactions.csv..."
-duckdb -c "
-SELECT block_height, transaction_hash, total_input_value
-FROM read_parquet('data/transactions/*.parquet')
-ORDER BY total_input_value DESC
-LIMIT 10;
-" > dashboard/data/top_transactions.csv
-
-# Number of transactions per block
-echo "Generating tx_count_per_block.csv..."
-duckdb -c "
-SELECT block_height, COUNT(transaction_hash) as tx_count
-FROM read_parquet('data/transactions/*.parquet')
-GROUP BY block_height
-ORDER BY block_height;
-" > dashboard/data/tx_count_per_block.csv
-
-# Top active sending addresses
-echo "Generating top_sending_addresses.csv..."
-duckdb -c "
-SELECT unnest(input_addresses) as input_address, COUNT(*) as tx_sent
-FROM read_parquet('data/transactions/*.parquet')
-GROUP BY input_address
-ORDER BY tx_sent DESC
-LIMIT 10;
-" > dashboard/data/top_sending_addresses.csv
-
-# Top active receiving addresses
-echo "Generating top_receiving_addresses.csv..."
-duckdb -c "
-SELECT unnest(output_addresses) as output_address, COUNT(*) as tx_received
-FROM read_parquet('data/transactions/*.parquet')
-GROUP BY output_address
-ORDER BY tx_received DESC
-LIMIT 10;
-" > dashboard/data/top_receiving_addresses.csv
-
-# Fee heatmap data (fees per block)
-echo "Generating fee_per_block.csv..."
-duckdb -c "
-SELECT block_height, SUM(fee) as total_fees
-FROM read_parquet('data/transactions/*.parquet')
-GROUP BY block_height
-ORDER BY block_height;
-" > dashboard/data/fee_per_block.csv
-
-# Block times
-echo "Generating block_times.csv..."
-duckdb -c "
-SELECT block_height, block_timestamp
-FROM read_parquet('data/block_meta/*.parquet')
-ORDER BY block_height;
-" > dashboard/data/block_times.csv
-
-# Congestion tracker (transactions per block)
-echo "Generating congestion.csv..."
-duckdb -c "
-SELECT block_height, transaction_count
-FROM read_parquet('data/block_meta/*.parquet')
-ORDER BY block_height;
-" > dashboard/data/congestion.csv
-
-echo "Real data processing completed. CSV files are ready for the dashboard."
+echo "Real data processing completed. Parquet files are ready for the dashboard."
+echo "The dashboard will read the Parquet files directly."

@@ -1,105 +1,102 @@
 #!/bin/bash
 
-# Script to monitor the progress of the Substreams
-# This script will check the data directory for Parquet files and estimate the remaining time
+# Script to monitor the progress of the Substreams process
+# This script will:
+# 1. Check if the Substreams process is running
+# 2. Check if the output files exist
+# 3. Display the progress
 
 # Navigate to the project directory
 cd "$(dirname "$0")/.." || { echo "Error: Cannot access project directory"; exit 1; }
 
 # Set variables
-DATA_DIR="data"
-BLOCK_META_DIR="$DATA_DIR/block_meta"
-TRANSACTIONS_DIR="$DATA_DIR/transactions"
+BLOCK_META_JSON="/tmp/block_meta.json"
+TRANSACTIONS_JSON="/tmp/transactions.json"
+BLOCK_META_PARQUET="data/block_meta/block_meta.parquet"
+TRANSACTIONS_PARQUET="data/transactions/transactions.parquet"
 
-# Check if the data directories exist
-if [ ! -d "$BLOCK_META_DIR" ] || [ ! -d "$TRANSACTIONS_DIR" ]; then
-  echo "Error: Data directories not found"
-  echo "Please run the run-substreams.sh script first"
-  exit 1
-fi
-
-# Get the start and end block from the run-substreams.sh script
-START_BLOCK=$(grep -o "START_BLOCK=[0-9]*" scripts/run-substreams.sh | cut -d= -f2)
-END_BLOCK=$(grep -o "END_BLOCK=[0-9]*" scripts/run-substreams.sh | cut -d= -f2)
-
-if [ -z "$START_BLOCK" ] || [ -z "$END_BLOCK" ]; then
-  echo "Error: Could not determine start and end blocks from run-substreams.sh"
-  exit 1
-fi
-
-# Calculate total blocks to process
-TOTAL_BLOCKS=$((END_BLOCK - START_BLOCK))
-
-# Function to get the highest block processed
-get_highest_block() {
-  local dir="$1"
-  local highest=0
-  
-  # Check if there are any Parquet files
-  if [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
-    echo 0
-    return
+# Function to check if the Substreams process is running
+check_substreams_process() {
+  if pgrep -f "substreams run" > /dev/null; then
+    echo "Substreams process is running."
+    ps aux | grep "substreams run" | grep -v grep
+    return 0
+  else
+    echo "Substreams process is not running."
+    return 1
   fi
-  
-  # Extract the end block from the filename (format: *-{start_block}-{end_block}.parquet)
-  for file in "$dir"/*.parquet; do
-    if [ -f "$file" ]; then
-      # Extract the end block from the filename
-      local end_block=$(basename "$file" | grep -o '[0-9]*\.parquet' | grep -o '[0-9]*')
-      if [ -n "$end_block" ] && [ "$end_block" -gt "$highest" ]; then
-        highest=$end_block
-      fi
-    fi
-  done
-  
-  echo $highest
 }
 
-# Get the highest block processed for each directory
-BLOCK_META_HIGHEST=$(get_highest_block "$BLOCK_META_DIR")
-TRANSACTIONS_HIGHEST=$(get_highest_block "$TRANSACTIONS_DIR")
-
-# Use the lowest of the two as the current progress
-CURRENT_BLOCK=$((BLOCK_META_HIGHEST < TRANSACTIONS_HIGHEST ? BLOCK_META_HIGHEST : TRANSACTIONS_HIGHEST))
-
-# Calculate progress
-if [ "$CURRENT_BLOCK" -eq 0 ]; then
-  echo "No blocks processed yet"
-  exit 0
-fi
-
-BLOCKS_PROCESSED=$((CURRENT_BLOCK - START_BLOCK))
-BLOCKS_REMAINING=$((END_BLOCK - CURRENT_BLOCK))
-PROGRESS_PERCENT=$(( (BLOCKS_PROCESSED * 100) / TOTAL_BLOCKS ))
-
-echo "Progress: $PROGRESS_PERCENT% ($BLOCKS_PROCESSED/$TOTAL_BLOCKS blocks)"
-echo "Current block: $CURRENT_BLOCK"
-echo "Blocks remaining: $BLOCKS_REMAINING"
-
-# Estimate remaining time if we have processed at least 100 blocks
-if [ "$BLOCKS_PROCESSED" -gt 100 ]; then
-  # Get the creation time of the oldest and newest files
-  OLDEST_FILE=$(find "$BLOCK_META_DIR" -name "*.parquet" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | head -1 | cut -d' ' -f2)
-  NEWEST_FILE=$(find "$BLOCK_META_DIR" -name "*.parquet" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2)
+# Function to check if the output files exist
+check_output_files() {
+  echo "Checking output files..."
   
-  if [ -n "$OLDEST_FILE" ] && [ -n "$NEWEST_FILE" ]; then
-    OLDEST_TIME=$(stat -c %Y "$OLDEST_FILE" 2>/dev/null || stat -f %m "$OLDEST_FILE" 2>/dev/null)
-    NEWEST_TIME=$(stat -c %Y "$NEWEST_FILE" 2>/dev/null || stat -f %m "$NEWEST_FILE" 2>/dev/null)
-    
-    if [ -n "$OLDEST_TIME" ] && [ -n "$NEWEST_TIME" ]; then
-      TIME_ELAPSED=$((NEWEST_TIME - OLDEST_TIME))
-      
-      if [ "$TIME_ELAPSED" -gt 0 ]; then
-        BLOCKS_PER_SECOND=$(echo "scale=2; $BLOCKS_PROCESSED / $TIME_ELAPSED" | bc)
-        ESTIMATED_SECONDS_REMAINING=$(echo "scale=0; $BLOCKS_REMAINING / $BLOCKS_PER_SECOND" | bc)
-        
-        # Convert seconds to a more readable format
-        ESTIMATED_HOURS=$((ESTIMATED_SECONDS_REMAINING / 3600))
-        ESTIMATED_MINUTES=$(( (ESTIMATED_SECONDS_REMAINING % 3600) / 60 ))
-        
-        echo "Estimated time remaining: ${ESTIMATED_HOURS}h ${ESTIMATED_MINUTES}m"
-        echo "Processing speed: $BLOCKS_PER_SECOND blocks/second"
-      fi
-    fi
+  if [ -f "$BLOCK_META_JSON" ]; then
+    echo "Block metadata JSON file exists: $BLOCK_META_JSON"
+    echo "File size: $(du -h "$BLOCK_META_JSON" | cut -f1)"
+  else
+    echo "Block metadata JSON file does not exist: $BLOCK_META_JSON"
   fi
-fi
+  
+  if [ -f "$TRANSACTIONS_JSON" ]; then
+    echo "Transactions JSON file exists: $TRANSACTIONS_JSON"
+    echo "File size: $(du -h "$TRANSACTIONS_JSON" | cut -f1)"
+  else
+    echo "Transactions JSON file does not exist: $TRANSACTIONS_JSON"
+  fi
+  
+  if [ -f "$BLOCK_META_PARQUET" ]; then
+    echo "Block metadata Parquet file exists: $BLOCK_META_PARQUET"
+    echo "File size: $(du -h "$BLOCK_META_PARQUET" | cut -f1)"
+  else
+    echo "Block metadata Parquet file does not exist: $BLOCK_META_PARQUET"
+  fi
+  
+  if [ -f "$TRANSACTIONS_PARQUET" ]; then
+    echo "Transactions Parquet file exists: $TRANSACTIONS_PARQUET"
+    echo "File size: $(du -h "$TRANSACTIONS_PARQUET" | cut -f1)"
+  else
+    echo "Transactions Parquet file does not exist: $TRANSACTIONS_PARQUET"
+  fi
+}
+
+# Function to display the progress
+display_progress() {
+  echo "Displaying progress..."
+  
+  # Check if the Substreams process is running
+  check_substreams_process
+  
+  # Check if the output files exist
+  check_output_files
+  
+  # Check if the dashboard data files exist
+  if [ -d "dashboard/data" ]; then
+    echo "Dashboard data files:"
+    ls -la dashboard/data
+  else
+    echo "Dashboard data directory does not exist: dashboard/data"
+  fi
+}
+
+# Main function
+main() {
+  echo "Monitoring Substreams progress..."
+  echo "Press Ctrl+C to exit."
+  
+  while true; do
+    clear
+    echo "=== Substreams Progress Monitor ==="
+    echo "Time: $(date)"
+    echo ""
+    
+    display_progress
+    
+    echo ""
+    echo "Refreshing in 5 seconds..."
+    sleep 5
+  done
+}
+
+# Run the main function
+main
