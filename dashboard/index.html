@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitcoin Activity Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            color: #212529;
+        }
+        .dashboard-container {
+            padding: 20px;
+        }
+        .card {
+            margin-bottom: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .card-header {
+            background-color: #007bff;
+            color: white;
+            border-radius: 10px 10px 0 0;
+        }
+        .table-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        h1 {
+            color: #007bff;
+            margin-bottom: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container dashboard-container">
+        <h1 class="text-center">Bitcoin Activity Dashboard</h1>
+        
+        <div class="row">
+            <!-- Blocks Over Time -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Blocks Over Time</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="blockTimesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Network Congestion -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Network Congestion</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="congestionChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <!-- Fee Tracking -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Fee Tracking</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="feeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Top Wallets -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Top Active Wallets</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="topWalletsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Whale Transactions -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Whale Transactions (Top 10 Largest)</h5>
+                    </div>
+                    <div class="card-body table-container">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Block Height</th>
+                                    <th>Transaction Hash</th>
+                                    <th>Value (Satoshi)</th>
+                                    <th>Value (BTC)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="whaleTransactionsTable">
+                                <!-- Data will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Function to load CSV data
+        async function loadCSV(file) {
+            return new Promise((resolve, reject) => {
+                Papa.parse(`./data/${file}.csv`, {
+                    download: true,
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        if (results.data && results.data.length > 0) {
+                            // Filter out any empty objects
+                            const filteredData = results.data.filter(item => 
+                                Object.keys(item).length > 0 && 
+                                !Object.keys(item).every(key => item[key] === "")
+                            );
+                            resolve(filteredData);
+                        } else {
+                            // If no valid data, provide a sample
+                            console.warn(`No valid data found in ${file}.csv, using sample data`);
+                            resolve([{block_height: "0", value: "0"}]);
+                        }
+                    },
+                    error: function(error) {
+                        console.error(`Error parsing ${file}.csv:`, error);
+                        // Provide sample data on error
+                        resolve([{block_height: "0", value: "0"}]);
+                    }
+                });
+            });
+        }
+
+        // Function to format timestamp
+        function formatTimestamp(timestamp) {
+            return new Date(timestamp).toLocaleString();
+        }
+
+        // Function to convert satoshi to BTC
+        function satoshiToBTC(satoshi) {
+            return (satoshi / 100000000).toFixed(8);
+        }
+
+        // Initialize charts when DOM is loaded
+        document.addEventListener('DOMContentLoaded', async function() {
+            try {
+                // Load data
+                const blockTimes = await loadCSV('block_times');
+                const congestion = await loadCSV('congestion');
+                const feePerBlock = await loadCSV('fee_per_block');
+                const topSendingAddresses = await loadCSV('top_sending_addresses');
+                const topReceivingAddresses = await loadCSV('top_receiving_addresses');
+                const topTransactions = await loadCSV('top_transactions');
+
+                // Blocks Over Time Chart
+                const blockTimesCtx = document.getElementById('blockTimesChart').getContext('2d');
+                new Chart(blockTimesCtx, {
+                    type: 'line',
+                    data: {
+                        labels: blockTimes.map(item => item.block_height),
+                        datasets: [{
+                            label: 'Block Timestamp',
+                            data: blockTimes.map(item => new Date(item.block_timestamp).getTime()),
+                            borderColor: '#007bff',
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                type: 'time',
+                                time: {
+                                    unit: 'day'
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Network Congestion Chart
+                const congestionCtx = document.getElementById('congestionChart').getContext('2d');
+                new Chart(congestionCtx, {
+                    type: 'line',
+                    data: {
+                        labels: congestion.map(item => item.block_height),
+                        datasets: [{
+                            label: 'Transactions per Block',
+                            data: congestion.map(item => item.transaction_count),
+                            borderColor: '#28a745',
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true
+                    }
+                });
+
+                // Fee Tracking Chart
+                const feeCtx = document.getElementById('feeChart').getContext('2d');
+                new Chart(feeCtx, {
+                    type: 'line',
+                    data: {
+                        labels: feePerBlock.map(item => item.block_height),
+                        datasets: [{
+                            label: 'Fees per Block (Satoshi)',
+                            data: feePerBlock.map(item => item.total_fees),
+                            borderColor: '#dc3545',
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true
+                    }
+                });
+
+                // Top Wallets Chart
+                const topWalletsCtx = document.getElementById('topWalletsChart').getContext('2d');
+                
+                // Combine top sending and receiving addresses
+                const topAddresses = [...topSendingAddresses.slice(0, 5), ...topReceivingAddresses.slice(0, 5)];
+                
+                new Chart(topWalletsCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: topAddresses.map(item => item.input_address || item.output_address),
+                        datasets: [{
+                            label: 'Transaction Count',
+                            data: topAddresses.map(item => item.tx_sent || item.tx_received),
+                            backgroundColor: topAddresses.map((_, index) => 
+                                index < 5 ? '#007bff' : '#28a745'
+                            )
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    title: function(tooltipItems) {
+                                        const index = tooltipItems[0].dataIndex;
+                                        return index < 5 ? 'Sender' : 'Receiver';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Populate Whale Transactions Table
+                const whaleTransactionsTable = document.getElementById('whaleTransactionsTable');
+                topTransactions.forEach(tx => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${tx.block_height}</td>
+                        <td>${tx.transaction_hash}</td>
+                        <td>${tx.total_input_value}</td>
+                        <td>${satoshiToBTC(tx.total_input_value)}</td>
+                    `;
+                    whaleTransactionsTable.appendChild(row);
+                });
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+                alert('Error loading data. Please make sure the CSV files are available.');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Ignore environment variables file containing API keys
+.env
+
+# Ignore data files
+data/**/*.parquet
+dashboard/data/*.csv
+
+# Ignore temporary files
+/tmp
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore node modules if we add any JavaScript dependencies later
+node_modules/

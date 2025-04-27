@@ -1,0 +1,32 @@
+output_format: parquet
+file_config:
+  filename_template: "{output_name}-{start_block}-{end_block}.parquet"
+  schema:
+    block_meta:
+      - name: block_height
+        type: uint64
+      - name: block_hash
+        type: string
+      - name: block_timestamp
+        type: timestamp
+      - name: transaction_count
+        type: uint64
+    transactions:
+      - name: block_height
+        type: uint64
+      - name: block_timestamp
+        type: timestamp
+      - name: transaction_hash
+        type: string
+      - name: input_addresses
+        type: string
+        array: true
+      - name: output_addresses
+        type: string
+        array: true
+      - name: total_input_value
+        type: uint64
+      - name: total_output_value
+        type: uint64
+      - name: fee
+        type: uint64
