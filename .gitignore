@@ -3,7 +3,11 @@
 
 # Ignore data files
 data/**/*.parquet
+data/json/transactions/transactions.json
 dashboard/data/*.csv
+
+# Ignore large log files
+replay.log
 
 # Ignore temporary files
 /tmp

@@ -23,12 +23,12 @@ if [ -z "$SUBSTREAMS_API_TOKEN" ]; then
 fi
 
 # Set variables
-PACKAGE="streamingfast/bitcoin-explorer:v0.1.0"
+PACKAGE="bitcoin-explorer@v0.1.0"
 ENDPOINT="bitcoin.substreams.pinax.network:443"
 # Bitcoin block height from ~3 months ago (adjust as needed)
-START_BLOCK=881121
+START_BLOCK=881304
 # Current Bitcoin block height (adjust as needed)
-END_BLOCK=894121
+END_BLOCK=894304
 # Modules to stream
 BLOCK_META_MODULE="map_block_meta"
 TRANSACTIONS_MODULE="map_transactions"
@@ -75,26 +75,30 @@ pip install pandas pyarrow || {
 
 # Step 1: Run Substreams to get block metadata
 echo "Step 1: Running Substreams to get block metadata..."
-substreams run "bitcoin-explorer@v0.1.0" "$BLOCK_META_MODULE" \
+substreams run \
+  -e "$ENDPOINT" \
   --start-block "$START_BLOCK" \
   --stop-block "$END_BLOCK" \
-  -e "$ENDPOINT" \
-  -H "Authorization: Bearer $SUBSTREAMS_API_TOKEN" \
+  -H "Authorization=Bearer $SUBSTREAMS_API_TOKEN" \
   --limit-processed-blocks 15000 \
-  --output json > /tmp/block_meta.json || {
+  --output json \
+  "$PACKAGE" \
+  "$BLOCK_META_MODULE" > /tmp/block_meta.json || {
   echo "Error: Failed to run Substreams for block metadata."
   exit 1
 }
 
 # Step 2: Run Substreams to get transactions
 echo "Step 2: Running Substreams to get transactions..."
-substreams run "bitcoin-explorer@v0.1.0" "$TRANSACTIONS_MODULE" \
+substreams run \
+  -e "$ENDPOINT" \
   --start-block "$START_BLOCK" \
   --stop-block "$END_BLOCK" \
-  -e "$ENDPOINT" \
-  -H "Authorization: Bearer $SUBSTREAMS_API_TOKEN" \
+  -H "Authorization=Bearer $SUBSTREAMS_API_TOKEN" \
   --limit-processed-blocks 15000 \
-  --output json > /tmp/transactions.json || {
+  --output json \
+  "$PACKAGE" \
+  "$TRANSACTIONS_MODULE" > /tmp/transactions.json || {
   echo "Error: Failed to run Substreams for transactions."
   exit 1
 }
