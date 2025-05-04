@@ -1,156 +1,37 @@
 #!/bin/bash
 
-# Script to build a custom Substreams module
-# This script will create and build a custom Substreams module for Bitcoin
+# Script to build a custom Bitcoin Substreams module
 
 # Navigate to the project directory
-cd "$(dirname "$0")/.." || { echo "Error: Cannot access project directory"; exit 1; }
+cd "$(dirname "$0")/..\" || { echo "Error: Cannot access project directory"; exit 1; }
 
-# Check if Rust and Cargo are installed
+# Check for required dependencies
 if ! command -v cargo &> /dev/null; then
-  echo "Error: Cargo is not installed"
-  echo "Please install Rust and Cargo from https://rustup.rs/"
-  exit 1
+    echo "Error: Rust and Cargo are required to build a custom module."
+    echo "Please install Rust from https://rustup.rs/"
+    exit 1
 fi
 
-# Set variables
-MODULE_DIR="custom-module"
+if ! command -v substreams &> /dev/null; then
+    echo "Error: Substreams CLI is required to build a custom module."
+    echo "Please install Substreams: brew install substreams"
+    exit 1
+fi
 
-# Check if the module directory already exists
-if [ -d "$MODULE_DIR" ]; then
-  echo "The custom module directory already exists."
-  read -p "Do you want to rebuild the existing module? (y/n) " -n 1 -r
-  echo ""
-  
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Operation cancelled."
-    exit 0
-  fi
-else
-  # Create the module directory
-  echo "Creating custom module directory..."
-  mkdir -p "$MODULE_DIR"
-  
-  # Initialize a new Rust project
-  echo "Initializing a new Rust project..."
-  cargo init --lib "$MODULE_DIR"
-  
-  # Create the Substreams manifest file
-  echo "Creating Substreams manifest file..."
-  cat > "$MODULE_DIR/substreams.yaml" << EOL
-specVersion: v0.1.0
-package:
-  name: bitcoin_custom_module
-  version: v0.1.0
+# Create the custom module directory
+MODULE_DIR="bitcoin-custom-module"
+mkdir -p "$MODULE_DIR"
+cd "$MODULE_DIR" || exit 1
 
-imports:
-  bitcoin: streamingfast/bitcoin-explorer:v0.1.0
-
-protobuf:
-  files:
-    - custom.proto
-  importPaths:
-    - ./proto
-
-binaries:
-  default:
-    type: wasm/rust-v1
-    file: target/wasm32-unknown-unknown/release/custom_module.wasm
-
-modules:
-  - name: map_custom
-    kind: map
-    inputs:
-      - source: sf.bitcoin.type.v1.Block
-    output:
-      type: proto:bitcoin_custom.v1.CustomOutput
-EOL
-  
-  # Create the proto directory and custom.proto file
-  echo "Creating proto directory and custom.proto file..."
-  mkdir -p "$MODULE_DIR/proto"
-  cat > "$MODULE_DIR/proto/custom.proto" << EOL
-syntax = "proto3";
-
-package bitcoin_custom.v1;
-
-message CustomOutput {
-  uint64 block_height = 1;
-  string block_hash = 2;
-  string timestamp = 3;
-  uint64 transaction_count = 4;
-  uint64 total_fees = 5;
-  uint64 largest_transaction_value = 6;
-}
-EOL
-  
-  # Create the src directory and lib.rs file
-  echo "Creating src/lib.rs file..."
-  cat > "$MODULE_DIR/src/lib.rs" << EOL
-mod pb;
-
-use pb::bitcoin_custom::v1::CustomOutput;
-use substreams::pb::sf::bitcoin::type_v1::Block;
-use substreams_bitcoin::pb::sf::bitcoin::type_v1 as bitcoin;
-use substreams::errors::Error;
-use substreams::log;
-use substreams::{Hex, store};
-use substreams_bitcoin::utils;
-use substreams::prelude::*;
-use substreams_entity_change::pb::entity::EntityChanges;
-
-#[substreams::handlers::map]
-fn map_custom(block: Block) -> Result<CustomOutput, Error> {
-    let block_height = block.height;
-    let block_hash = Hex::encode(&block.hash);
-    let timestamp = block.header.as_ref().map(|h| h.timestamp.clone()).unwrap_or_default();
-    let transaction_count = block.transaction_count;
+# Initialize a new Rust project if it doesn't exist
+if [ ! -f "Cargo.toml" ]; then
+    echo "Initializing a new Rust project for the custom module..."
+    cargo init --lib
     
-    let mut total_fees = 0;
-    let mut largest_transaction_value = 0;
-    
-    for tx in block.transactions {
-        // Calculate transaction fee (input - output)
-        let mut total_input_value = 0;
-        for input in &tx.inputs {
-            total_input_value += input.value;
-        }
-        
-        let mut total_output_value = 0;
-        for output in &tx.outputs {
-            total_output_value += output.value;
-        }
-        
-        let fee = if total_input_value > total_output_value {
-            total_input_value - total_output_value
-        } else {
-            0 // Coinbase transaction or error
-        };
-        
-        total_fees += fee;
-        
-        // Track largest transaction value
-        if total_input_value > largest_transaction_value {
-            largest_transaction_value = total_input_value;
-        }
-    }
-    
-    Ok(CustomOutput {
-        block_height,
-        block_hash,
-        timestamp,
-        transaction_count,
-        total_fees,
-        largest_transaction_value,
-    })
-}
-EOL
-  
-  # Create the Cargo.toml file
-  echo "Creating Cargo.toml file..."
-  cat > "$MODULE_DIR/Cargo.toml" << EOL
+    # Update Cargo.toml
+    cat > Cargo.toml << EOF
 [package]
-name = "custom_module"
+name = "bitcoin-custom-module"
 version = "0.1.0"
 edition = "2021"
 
@@ -158,74 +39,235 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-substreams = "0.5.0"
-substreams-bitcoin = "0.1.0"
-substreams-entity-change = "1.3.0"
-prost = "0.11.0"
-prost-types = "0.11.0"
+substreams = "0.5"
+substreams-bitcoin = "0.1"
+prost = "0.11"
+prost-types = "0.11"
+hex = "0.4.3"
+serde_json = "1.0"
+num-bigint = "0.4"
+num-traits = "0.2"
 
 [profile.release]
 lto = true
 opt-level = 's'
 strip = "debuginfo"
-EOL
-  
-  # Create the build.rs file
-  echo "Creating build.rs file..."
-  cat > "$MODULE_DIR/build.rs" << EOL
-use std::io::Result;
-use std::path::PathBuf;
-use std::process::Command;
+EOF
+fi
 
-fn main() -> Result<()> {
-    let proto_dir = PathBuf::from("./proto");
-    let proto_file = proto_dir.join("custom.proto");
+# Create the proto file
+mkdir -p "proto"
+cat > "proto/bitcoin.proto" << EOF
+syntax = "proto3";
 
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    let out_file = out_dir.join("pb.rs");
+package bitcoin.custom.v1;
 
-    // Generate Rust code from the proto file
-    Command::new("protoc")
-        .arg("--rust_out")
-        .arg(out_dir.to_str().unwrap())
-        .arg("--proto_path")
-        .arg(proto_dir.to_str().unwrap())
-        .arg(proto_file.to_str().unwrap())
-        .output()
-        .expect("Failed to execute protoc");
+message BlockStats {
+    uint64 height = 1;
+    uint64 timestamp = 2;
+    uint32 transaction_count = 3;
+    uint64 total_fees = 4;
+    uint64 largest_transaction_value = 5;
+    string largest_transaction_hash = 6;
+}
 
-    // Create the pb.rs module
-    std::fs::write(
-        "src/pb.rs",
-        r#"
-pub mod bitcoin_custom {
-    pub mod v1 {
-        include!(concat!(env!("OUT_DIR"), "/bitcoin_custom.v1.rs"));
+message WhaleTransaction {
+    uint64 block_height = 1;
+    uint64 block_timestamp = 2;
+    string transaction_hash = 3;
+    uint64 value = 4;
+    repeated string input_addresses = 5;
+    repeated string output_addresses = 6;
+}
+EOF
+
+# Create lib.rs with the custom module
+mkdir -p "src"
+cat > "src/lib.rs" << EOF
+use substreams::errors::Error;
+use substreams::pb::substreams::Clock;
+use substreams::{log, Hex};
+use substreams_bitcoin::{pb as bitcoin, Block};
+
+#[substreams::handlers::map]
+fn map_block_stats(block: Block) -> Result<bitcoin::custom::v1::BlockStats, Error> {
+    // Find the largest transaction in the block
+    let mut largest_tx_value = 0u64;
+    let mut largest_tx_hash = String::new();
+    
+    for tx in block.transactions() {
+        let total_value: u64 = tx.outputs().iter().map(|o| o.value).sum();
+        if total_value > largest_tx_value {
+            largest_tx_value = total_value;
+            largest_tx_hash = Hex::encode(tx.hash());
+        }
+    }
+    
+    // Calculate total fees for the block
+    let total_fees = calculate_block_fees(&block);
+    
+    // Create the BlockStats message
+    Ok(bitcoin::custom::v1::BlockStats {
+        height: block.number,
+        timestamp: block.timestamp.unwrap_or_default().seconds as u64,
+        transaction_count: block.transaction_count() as u32,
+        total_fees,
+        largest_transaction_value: largest_tx_value,
+        largest_transaction_hash: largest_tx_hash,
+    })
+}
+
+#[substreams::handlers::map]
+fn map_whale_transactions(block: Block) -> Result<Vec<bitcoin::custom::v1::WhaleTransaction>, Error> {
+    const WHALE_THRESHOLD: u64 = 100_000_000; // 1 BTC in satoshis
+    
+    let mut whale_txs = Vec::new();
+    
+    for tx in block.transactions() {
+        // Calculate total input value
+        let total_value: u64 = tx.outputs().iter().map(|o| o.value).sum();
+        
+        // Only process transactions above the whale threshold
+        if total_value >= WHALE_THRESHOLD {
+            // Extract input addresses
+            let input_addresses = tx
+                .inputs()
+                .iter()
+                .filter_map(|input| input.address().map(|a| a.to_string()))
+                .collect();
+                
+            // Extract output addresses
+            let output_addresses = tx
+                .outputs()
+                .iter()
+                .filter_map(|output| output.address().map(|a| a.to_string()))
+                .collect();
+                
+            // Create the WhaleTransaction message
+            whale_txs.push(bitcoin::custom::v1::WhaleTransaction {
+                block_height: block.number,
+                block_timestamp: block.timestamp.unwrap_or_default().seconds as u64,
+                transaction_hash: Hex::encode(tx.hash()),
+                value: total_value,
+                input_addresses,
+                output_addresses,
+            });
+        }
+    }
+    
+    log::info!("Found {} whale transactions in block {}", whale_txs.len(), block.number);
+    Ok(whale_txs)
+}
+
+// Helper function to calculate total fees in a block
+fn calculate_block_fees(block: &Block) -> u64 {
+    let mut total_fees = 0u64;
+    
+    for tx in block.transactions() {
+        let input_sum: u64 = tx.inputs().iter()
+            .filter_map(|input| input.previous_output.as_ref())
+            .map(|prev| prev.value)
+            .sum();
+            
+        let output_sum: u64 = tx.outputs().iter().map(|o| o.value).sum();
+        
+        // If input_sum > output_sum, the difference is the fee
+        if input_sum > output_sum {
+            total_fees += input_sum - output_sum;
+        }
+    }
+    
+    total_fees
+}
+
+#[substreams::pb::mod_custom_bitcoin_v1]
+pub mod pb {
+    #[derive(Clone, PartialEq, ::prost::Message)]
+    pub struct BlockStats {
+        #[prost(uint64, tag="1")]
+        pub height: u64,
+        #[prost(uint64, tag="2")]
+        pub timestamp: u64,
+        #[prost(uint32, tag="3")]
+        pub transaction_count: u32,
+        #[prost(uint64, tag="4")]
+        pub total_fees: u64,
+        #[prost(uint64, tag="5")]
+        pub largest_transaction_value: u64,
+        #[prost(string, tag="6")]
+        pub largest_transaction_hash: ::prost::alloc::string::String,
+    }
+    
+    #[derive(Clone, PartialEq, ::prost::Message)]
+    pub struct WhaleTransaction {
+        #[prost(uint64, tag="1")]
+        pub block_height: u64,
+        #[prost(uint64, tag="2")]
+        pub block_timestamp: u64,
+        #[prost(string, tag="3")]
+        pub transaction_hash: ::prost::alloc::string::String,
+        #[prost(uint64, tag="4")]
+        pub value: u64,
+        #[prost(string, repeated, tag="5")]
+        pub input_addresses: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+        #[prost(string, repeated, tag="6")]
+        pub output_addresses: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     }
 }
-"#,
-    )?;
+EOF
 
-    Ok(())
-}
-EOL
-fi
+# Create the substreams.yaml config file
+cat > "substreams.yaml" << EOF
+specVersion: v0.1.0
+package:
+  name: bitcoin_custom_module
+  version: v0.1.0
 
-# Install the wasm32-unknown-unknown target
-echo "Installing wasm32-unknown-unknown target..."
-rustup target add wasm32-unknown-unknown
+imports:
+  bitcoin: https://github.com/streamingfast/firehose-bitcoin/releases/download/v0.1.0/bitcoin-v0.1.0.spkg
 
-# Build the custom module
-echo "Building custom module..."
-cd "$MODULE_DIR" || { echo "Error: Cannot access module directory"; exit 1; }
+protobuf:
+  files:
+    - proto/bitcoin.proto
+  importPaths:
+    - ./proto
+
+binaries:
+  default:
+    type: wasm/rust-v1
+    file: target/wasm32-unknown-unknown/release/bitcoin_custom_module.wasm
+
+modules:
+  - name: map_block_stats
+    kind: map
+    initialBlock: 0
+    inputs:
+      - source: sf.bitcoin.type.v1.Block
+    output:
+      type: proto:bitcoin.custom.v1.BlockStats
+
+  - name: map_whale_transactions
+    kind: map
+    initialBlock: 0
+    inputs:
+      - source: sf.bitcoin.type.v1.Block
+    output:
+      type: proto:bitcoin.custom.v1.WhaleTransaction
+EOF
+
+# Build the module
+echo "Building the custom Bitcoin Substreams module..."
 cargo build --target wasm32-unknown-unknown --release
 
-# Check if the build was successful
-if [ -f "target/wasm32-unknown-unknown/release/custom_module.wasm" ]; then
-  echo "Custom module built successfully!"
-  echo "You can now use this custom module with Substreams."
-  echo "To use it, update the run-substreams.sh script to use this module instead of the default ones."
-else
-  echo "Error: Failed to build custom module"
-  exit 1
-fi
+# Pack the module
+echo "Packing the module..."
+substreams pack
+
+echo "Custom Bitcoin Substreams module built successfully!"
+echo "Module package: $(pwd)/target/bitcoin_custom_module-v0.1.0.spkg"
+echo ""
+echo "To use this module with the Bitcoin Substreams endpoint, run:"
+echo "substreams run -e bitcoin.substreams.pinax.network:443 $(pwd)/target/bitcoin_custom_module-v0.1.0.spkg map_block_stats --start-block 881304 -H \"Authorization=Bearer \$SUBSTREAMS_API_TOKEN\""
+echo ""
+echo "or for whale transactions:"
+echo "substreams run -e bitcoin.substreams.pinax.network:443 $(pwd)/target/bitcoin_custom_module-v0.1.0.spkg map_whale_transactions --start-block 881304 -H \"Authorization=Bearer \$SUBSTREAMS_API_TOKEN\""

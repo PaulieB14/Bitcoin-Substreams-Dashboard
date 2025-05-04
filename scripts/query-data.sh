@@ -4,7 +4,7 @@
 # This script will run various queries on the Parquet files and output the results to CSV files
 
 # Navigate to the project directory
-cd "$(dirname "$0")/.." || { echo "Error: Cannot access project directory"; exit 1; }
+cd "$(dirname "$0")/..\" || { echo "Error: Cannot access project directory"; exit 1; }
 
 # Set variables
 DATA_DIR="data"
@@ -48,6 +48,9 @@ if [ ! "$(find "$DATA_DIR" -name "*.parquet" | wc -l)" -gt 0 ]; then
   
   echo "block_height,transaction_count" > "$OUTPUT_DIR/congestion.csv"
   echo "0,0" >> "$OUTPUT_DIR/congestion.csv"
+  
+  echo "date,total_transactions,total_volume,avg_fee" > "$OUTPUT_DIR/daily_activity.csv"
+  echo "2023-01-01,0,0,0" >> "$OUTPUT_DIR/daily_activity.csv"
   
   echo "Sample data created for testing."
   echo "All queries completed. Results are in $OUTPUT_DIR directory."
@@ -123,6 +126,41 @@ ORDER BY block_height;
 run_query "congestion" "
 SELECT block_height, transaction_count
 FROM read_parquet('$DATA_DIR/block_meta/*.parquet')
+ORDER BY block_height;
+"
+
+# NEW QUERY: Whale transactions only (over 1 BTC)
+run_query "whale_transactions" "
+SELECT block_height, transaction_hash, total_input_value
+FROM read_parquet('$DATA_DIR/transactions/*.parquet')
+WHERE total_input_value >= 100000000  -- 1 BTC in satoshis
+ORDER BY total_input_value DESC
+LIMIT 50;
+"
+
+# NEW QUERY: Daily activity metrics
+run_query "daily_activity" "
+WITH daily_txs AS (
+  SELECT 
+    DATE_TRUNC('day', block_timestamp) as date,
+    COUNT(*) as total_transactions,
+    SUM(total_input_value) as total_volume,
+    AVG(fee) as avg_fee
+  FROM read_parquet('$DATA_DIR/transactions/*.parquet')
+  GROUP BY DATE_TRUNC('day', block_timestamp)
+)
+SELECT * FROM daily_txs
+ORDER BY date;
+"
+
+# NEW QUERY: Fee rate analysis
+run_query "fee_rate_analysis" "
+SELECT 
+  block_height,
+  NTILE(4) OVER (ORDER BY fee) as fee_quartile,
+  AVG(fee) as avg_fee
+FROM read_parquet('$DATA_DIR/transactions/*.parquet')
+GROUP BY block_height
 ORDER BY block_height;
 "
 

@@ -4,7 +4,7 @@
 # This script will stream ~3 months of Bitcoin data and output Parquet files
 
 # Navigate to the project directory
-cd "$(dirname "$0")/.." || { echo "Error: Cannot access project directory"; exit 1; }
+cd "$(dirname "$0")/..\" || { echo "Error: Cannot access project directory"; exit 1; }
 
 # Load environment variables
 if [ -f ".env" ]; then
@@ -27,8 +27,17 @@ PACKAGE="bitcoin-explorer@v0.1.0"
 ENDPOINT="bitcoin.substreams.pinax.network:443"
 # Bitcoin block height from ~3 months ago (adjust as needed)
 START_BLOCK=881304
-# Current Bitcoin block height (adjust as needed)
-END_BLOCK=894304
+# Current Bitcoin block height (fetch dynamically)
+CURRENT_BLOCK=$(curl -s https://blockchain.info/q/getblockcount)
+# If fetch fails, use a default end block
+if [ -z "$CURRENT_BLOCK" ]; then
+  END_BLOCK=894304
+  echo "Warning: Could not fetch current block height. Using default end block: $END_BLOCK"
+else
+  END_BLOCK=$CURRENT_BLOCK
+  echo "Current Bitcoin block height: $END_BLOCK"
+fi
+
 # Modules to stream
 BLOCK_META_MODULE="map_block_meta"
 TRANSACTIONS_MODULE="map_transactions"
@@ -37,16 +46,10 @@ BLOCK_RANGE="${START_BLOCK}:${END_BLOCK}"
 # Create data directories if they don't exist
 mkdir -p data/block_meta
 mkdir -p data/transactions
+mkdir -p dashboard/data
 
 echo "Starting Bitcoin Substreams..."
 echo "Streaming blocks from $START_BLOCK to $END_BLOCK"
-
-# Create directories for data
-mkdir -p data/block_meta
-mkdir -p data/transactions
-mkdir -p dashboard/data
-
-echo "Fetching real Bitcoin data using Substreams..."
 
 # Create a virtual environment for Python packages
 VENV_DIR="/tmp/bitcoin-dashboard-venv"
@@ -68,7 +71,7 @@ source "$VENV_DIR/bin/activate" || {
 
 # Install required packages
 echo "Installing required packages in virtual environment..."
-pip install pandas pyarrow || {
+pip install pandas pyarrow requests tqdm || {
   echo "Error: Failed to install required packages."
   exit 1
 }
@@ -103,8 +106,8 @@ substreams run \
   exit 1
 }
 
-# Step 3: Convert JSON to Parquet
-echo "Step 3: Converting JSON to Parquet..."
+# Step 3: Convert JSON to Parquet with enhanced fields
+echo "Step 3: Converting JSON to Parquet with enhanced fields..."
 
 # Convert block_meta.json to Parquet
 echo "Converting block_meta.json to Parquet..."
@@ -112,12 +115,13 @@ python -c '
 import pandas as pd
 import json
 import os
+from tqdm import tqdm
 
 try:
     # Load JSON data line by line
     block_meta_data = []
     with open("/tmp/block_meta.json", "r") as f:
-        for line in f:
+        for line in tqdm(f, desc="Processing block metadata"):
             try:
                 obj = json.loads(line)
                 if "@data" in obj:
@@ -143,6 +147,12 @@ try:
     print("Block metadata DataFrame columns:", df.columns.tolist())
     print("Block metadata DataFrame shape:", df.shape)
 
+    # Add derived fields
+    if "block_timestamp" in df.columns:
+        df["date"] = pd.to_datetime(df["block_timestamp"]).dt.date
+    if "transaction_count" in df.columns:
+        df["is_congested"] = df["transaction_count"] > df["transaction_count"].quantile(0.75)
+
     # Save as Parquet
     df.to_parquet("data/block_meta/block_meta.parquet")
     print("Successfully converted block_meta.json to Parquet")
@@ -154,18 +164,22 @@ except Exception as e:
   exit 1
 }
 
-# Convert transactions.json to Parquet
-echo "Converting transactions.json to Parquet..."
+# Convert transactions.json to Parquet with whale detection
+echo "Converting transactions.json to Parquet with whale detection..."
 python -c '
 import pandas as pd
 import json
 import os
+from tqdm import tqdm
+
+# Define threshold for whale transactions (1 BTC in satoshis)
+WHALE_THRESHOLD = 100000000
 
 try:
     # Load JSON data line by line
     transactions_data = []
     with open("/tmp/transactions.json", "r") as f:
-        for line in f:
+        for line in tqdm(f, desc="Processing transactions"):
             try:
                 obj = json.loads(line)
                 if "@data" in obj:
@@ -173,6 +187,18 @@ try:
                     data = obj["@data"]
                     # Add the block number
                     data["block_height"] = obj["@block"]
+                    # Add timestamp if available
+                    if "timestamp" in obj:
+                        data["block_timestamp"] = obj["timestamp"]
+                    
+                    # Calculate fee
+                    if "total_input_value" in data and "total_output_value" in data:
+                        data["fee"] = data["total_input_value"] - data["total_output_value"]
+                    
+                    # Add whale transaction flag
+                    if "total_input_value" in data:
+                        data["is_whale_transaction"] = data["total_input_value"] >= WHALE_THRESHOLD
+                    
                     transactions_data.append(data)
             except json.JSONDecodeError:
                 # Skip invalid lines
@@ -184,9 +210,24 @@ try:
     # Print DataFrame info for debugging
     print("Transactions DataFrame columns:", df.columns.tolist())
     print("Transactions DataFrame shape:", df.shape)
+    
+    # Calculate additional metrics if possible
+    if "fee" in df.columns and "block_height" in df.columns:
+        # Calculate average fee per block
+        fee_per_block = df.groupby("block_height")["fee"].mean().reset_index()
+        fee_per_block.rename(columns={"fee": "avg_fee_per_block"}, inplace=True)
+        # Merge back to main dataframe
+        df = df.merge(fee_per_block, on="block_height", how="left")
 
     # Save as Parquet
     df.to_parquet("data/transactions/transactions.parquet")
+    
+    # Create a subset for whale transactions only
+    if "is_whale_transaction" in df.columns:
+        whale_df = df[df["is_whale_transaction"] == True]
+        whale_df.to_parquet("data/transactions/whale_transactions.parquet")
+        print(f"Saved {len(whale_df)} whale transactions to separate Parquet file")
+    
     print("Successfully converted transactions.json to Parquet")
 except Exception as e:
     print(f"Error converting transactions.json to Parquet: {e}")
@@ -198,9 +239,6 @@ except Exception as e:
 
 # Deactivate the virtual environment
 deactivate
-
-# Create dashboard data directory if it doesn't exist
-mkdir -p dashboard/data
 
 echo "Real data processing completed. Parquet files are ready for the dashboard."
 echo "The dashboard will read the Parquet files directly."

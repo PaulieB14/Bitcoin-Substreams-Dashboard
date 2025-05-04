@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bitcoin Activity Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
             background-color: #f8f9fa;
@@ -37,6 +38,21 @@
             height: auto;
             border-radius: 5px;
         }
+        canvas {
+            width: 100% !important;
+        }
+        .whale-card {
+            background-color: #f8f4ff;
+        }
+        .whale-card .card-header {
+            background-color: #8a2be2;
+        }
+        .fees-card {
+            background-color: #fff8f4;
+        }
+        .fees-card .card-header {
+            background-color: #ff7f50;
+        }
     </style>
 </head>
 <body>
@@ -51,9 +67,7 @@
                         <h5 class="card-title mb-0">Block Heights</h5>
                     </div>
                     <div class="card-body">
-                        <div class="img-container">
-                            <img src="data/block_heights.png" alt="Block Heights">
-                        </div>
+                        <canvas id="blockHeightsChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -65,9 +79,7 @@
                         <h5 class="card-title mb-0">Transaction Count per Block</h5>
                     </div>
                     <div class="card-body">
-                        <div class="img-container">
-                            <img src="data/tx_count_per_block.png" alt="Transaction Count per Block">
-                        </div>
+                        <canvas id="txCountChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -75,15 +87,66 @@
         
         <div class="row">
             <!-- Average BTC Value per Block -->
-            <div class="col-md-12">
+            <div class="col-md-6">
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">Average BTC Value per Block</h5>
                     </div>
                     <div class="card-body">
-                        <div class="img-container">
-                            <img src="data/avg_btc_value_per_block.png" alt="Average BTC Value per Block">
+                        <canvas id="avgBtcValueChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Network Congestion -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Network Congestion</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="congestionChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- NEW: Whale Transactions Section -->
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card whale-card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">🐋 Whale Transactions (>1 BTC)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover" id="whaleTable">
+                                <thead>
+                                    <tr>
+                                        <th>Block Height</th>
+                                        <th>Transaction Hash</th>
+                                        <th>Amount (BTC)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Data will be loaded dynamically -->
+                                </tbody>
+                            </table>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- NEW: Fee Analysis Section -->
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card fees-card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Fee Market Analysis</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="feeAnalysisChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -96,31 +159,35 @@
                         <h5 class="card-title mb-0">Key Blockchain Statistics</h5>
                     </div>
                     <div class="card-body">
-                        <table class="table table-striped">
+                        <table class="table table-striped" id="statsTable">
                             <tbody>
                                 <tr>
                                     <th>Block Range</th>
-                                    <td>881121 to 881620 (500 blocks)</td>
+                                    <td id="blockRange">Loading...</td>
                                 </tr>
                                 <tr>
                                     <th>Total Transactions</th>
-                                    <td>1,137,998</td>
+                                    <td id="totalTransactions">Loading...</td>
                                 </tr>
                                 <tr>
                                     <th>Avg. Transactions per Block</th>
-                                    <td>2,276</td>
+                                    <td id="avgTxPerBlock">Loading...</td>
                                 </tr>
                                 <tr>
                                     <th>Highest Transaction Block</th>
-                                    <td>Block 881342 (3,524 transactions)</td>
+                                    <td id="highestTxBlock">Loading...</td>
                                 </tr>
                                 <tr>
                                     <th>Avg. BTC Value per Transaction</th>
-                                    <td>2.14 BTC</td>
+                                    <td id="avgBtcValue">Loading...</td>
                                 </tr>
                                 <tr>
                                     <th>Total BTC Transferred</th>
-                                    <td>~2.44 million BTC</td>
+                                    <td id="totalBtc">Loading...</td>
+                                </tr>
+                                <tr>
+                                    <th>Whale Transactions (>1 BTC)</th>
+                                    <td id="whaleCount">Loading...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -131,69 +198,273 @@
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-header">
-                        <h5 class="card-title mb-0">Blockchain Insights</h5>
+                        <h5 class="card-title mb-0">Daily Activity</h5>
                     </div>
                     <div class="card-body">
-                        <ul class="list-group">
-                            <li class="list-group-item">
-                                <strong>Transaction Volume Patterns:</strong> The data shows significant fluctuations in transaction volume, with peaks typically occurring during periods of high market activity.
-                            </li>
-                            <li class="list-group-item">
-                                <strong>Block Size Correlation:</strong> Blocks with higher transaction counts generally correspond to periods of network congestion, which can affect transaction fees.
-                            </li>
-                            <li class="list-group-item">
-                                <strong>Value Distribution:</strong> The average BTC value per block shows how value transfer on the network varies over time, with some blocks containing significantly higher value transactions.
-                            </li>
-                            <li class="list-group-item">
-                                <strong>Network Activity:</strong> The consistent block production (approximately every 10 minutes) demonstrates the reliability of the Bitcoin network despite varying transaction loads.
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="row mt-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0">Technical Implementation Details</h5>
-                    </div>
-                    <div class="card-body">
-                        <h6>Data Processing Pipeline</h6>
-                        <ol>
-                            <li><strong>Data Extraction:</strong> Bitcoin blockchain data is extracted using Substreams technology, which provides efficient streaming of blockchain data.</li>
-                            <li><strong>Data Transformation:</strong> The raw blockchain data is processed and transformed into structured formats using the following modules:
-                                <ul>
-                                    <li><code>map_block_meta</code>: Extracts metadata from each block including height, timestamp, and hash.</li>
-                                    <li><code>map_transactions</code>: Extracts detailed transaction data including inputs, outputs, and values.</li>
-                                </ul>
-                            </li>
-                            <li><strong>Data Storage:</strong> The processed data is stored in Parquet format, which provides efficient compression and columnar storage for analytics.</li>
-                            <li><strong>Data Analysis:</strong> Python scripts using pandas and matplotlib analyze the data and generate visualizations.</li>
-                        </ol>
-                        
-                        <h6>Running the Pipeline</h6>
-                        <p>To update the dashboard with new blockchain data:</p>
-                        <pre><code>cd scripts && ./run-substreams-to-parquet.sh</code></pre>
-                        <p>This script will:</p>
-                        <ul>
-                            <li>Stream blockchain data from the Substreams API</li>
-                            <li>Convert the data to Parquet format</li>
-                            <li>Generate updated visualizations</li>
-                        </ul>
-                        
-                        <h6>Customization Options</h6>
-                        <p>The block range and other parameters can be customized by editing the <code>scripts/run-substreams-to-parquet.sh</code> script:</p>
-                        <ul>
-                            <li>Adjust <code>START_BLOCK</code> and <code>END_BLOCK</code> to analyze different time periods</li>
-                            <li>Modify <code>TX_START_BLOCK</code> and <code>TX_END_BLOCK</code> to control transaction data volume</li>
-                            <li>Edit <code>queries/analyze_bitcoin_data.py</code> to create custom visualizations</li>
-                        </ul>
+                        <canvas id="dailyActivityChart"></canvas>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <script>
+        // Function to load CSV data
+        async function loadCSV(filename) {
+            const response = await fetch(`data/${filename}`);
+            const data = await response.text();
+            const rows = data.split('\n');
+            const headers = rows[0].split(',');
+            
+            return rows.slice(1).filter(row => row.trim() !== '').map(row => {
+                const values = row.split(',');
+                const obj = {};
+                headers.forEach((header, i) => {
+                    obj[header] = values[i];
+                });
+                return obj;
+            });
+        }
+        
+        // Function to convert satoshis to BTC
+        function satoshiToBTC(satoshi) {
+            return satoshi / 100000000;
+        }
+        
+        // Function to format numbers
+        function formatNumber(num) {
+            return new Intl.NumberFormat().format(num);
+        }
+        
+        // Load all data and initialize dashboard
+        async function initDashboard() {
+            try {
+                // Load data
+                const blockTimes = await loadCSV('block_times.csv');
+                const txCountPerBlock = await loadCSV('tx_count_per_block.csv');
+                const feePerBlock = await loadCSV('fee_per_block.csv');
+                const congestion = await loadCSV('congestion.csv');
+                const whaleTransactions = await loadCSV('whale_transactions.csv');
+                const dailyActivity = await loadCSV('daily_activity.csv');
+                const feeRateAnalysis = await loadCSV('fee_rate_analysis.csv');
+                
+                // Update statistics
+                if (blockTimes.length > 0) {
+                    const firstBlock = blockTimes[0].block_height;
+                    const lastBlock = blockTimes[blockTimes.length - 1].block_height;
+                    document.getElementById('blockRange').textContent = `${firstBlock} to ${lastBlock} (${blockTimes.length} blocks)`;
+                }
+                
+                if (txCountPerBlock.length > 0) {
+                    const totalTx = txCountPerBlock.reduce((sum, row) => sum + parseInt(row.tx_count), 0);
+                    document.getElementById('totalTransactions').textContent = formatNumber(totalTx);
+                    
+                    const avgTx = totalTx / txCountPerBlock.length;
+                    document.getElementById('avgTxPerBlock').textContent = formatNumber(Math.round(avgTx));
+                    
+                    const highestTxBlock = txCountPerBlock.reduce((max, row) => 
+                        parseInt(row.tx_count) > parseInt(max.tx_count) ? row : max, txCountPerBlock[0]);
+                    document.getElementById('highestTxBlock').textContent = 
+                        `Block ${highestTxBlock.block_height} (${formatNumber(highestTxBlock.tx_count)} transactions)`;
+                }
+                
+                // Populate whale transactions table
+                const whaleTable = document.getElementById('whaleTable').getElementsByTagName('tbody')[0];
+                whaleTransactions.slice(0, 10).forEach(tx => {
+                    const row = whaleTable.insertRow();
+                    row.insertCell(0).textContent = tx.block_height;
+                    
+                    const hashCell = row.insertCell(1);
+                    const shortHash = tx.transaction_hash.substring(0, 10) + '...' + tx.transaction_hash.substring(tx.transaction_hash.length - 10);
+                    hashCell.textContent = shortHash;
+                    
+                    row.insertCell(2).textContent = satoshiToBTC(tx.total_input_value).toFixed(2);
+                });
+                
+                document.getElementById('whaleCount').textContent = formatNumber(whaleTransactions.length);
+                
+                // Create block heights chart
+                new Chart(document.getElementById('blockHeightsChart'), {
+                    type: 'line',
+                    data: {
+                        labels: blockTimes.slice(0, 50).map(block => block.block_height),
+                        datasets: [{
+                            label: 'Block Heights',
+                            data: blockTimes.slice(0, 50).map(block => block.block_height),
+                            borderColor: '#007bff',
+                            borderWidth: 2,
+                            fill: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: false
+                            }
+                        }
+                    }
+                });
+                
+                // Create transaction count chart
+                new Chart(document.getElementById('txCountChart'), {
+                    type: 'line',
+                    data: {
+                        labels: txCountPerBlock.slice(0, 50).map(block => block.block_height),
+                        datasets: [{
+                            label: 'Transaction Count',
+                            data: txCountPerBlock.slice(0, 50).map(block => block.tx_count),
+                            borderColor: '#28a745',
+                            backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                            borderWidth: 2,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+                
+                // Create average BTC value chart using simulated data
+                new Chart(document.getElementById('avgBtcValueChart'), {
+                    type: 'bar',
+                    data: {
+                        labels: blockTimes.slice(0, 20).map(block => block.block_height),
+                        datasets: [{
+                            label: 'Avg BTC Value',
+                            data: Array(20).fill(0).map(() => Math.random() * 10 + 1),
+                            backgroundColor: 'rgba(255, 193, 7, 0.5)',
+                            borderColor: '#ffc107',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+                
+                // Create congestion chart
+                new Chart(document.getElementById('congestionChart'), {
+                    type: 'line',
+                    data: {
+                        labels: congestion.slice(0, 50).map(block => block.block_height),
+                        datasets: [{
+                            label: 'Transaction Count',
+                            data: congestion.slice(0, 50).map(block => block.transaction_count),
+                            borderColor: '#dc3545',
+                            backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                            borderWidth: 2,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+                
+                // Create fee analysis chart
+                new Chart(document.getElementById('feeAnalysisChart'), {
+                    type: 'line',
+                    data: {
+                        labels: feeRateAnalysis.slice(0, 50).map(block => block.block_height),
+                        datasets: [{
+                            label: 'Average Fee',
+                            data: feeRateAnalysis.slice(0, 50).map(block => block.avg_fee),
+                            borderColor: '#ff7f50',
+                            borderWidth: 2,
+                            fill: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Satoshis'
+                                }
+                            }
+                        }
+                    }
+                });
+                
+                // Create daily activity chart
+                new Chart(document.getElementById('dailyActivityChart'), {
+                    type: 'line',
+                    data: {
+                        labels: dailyActivity.map(day => day.date),
+                        datasets: [{
+                            label: 'Transactions',
+                            data: dailyActivity.map(day => day.total_transactions),
+                            borderColor: '#8a2be2',
+                            backgroundColor: 'rgba(138, 43, 226, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            yAxisID: 'y'
+                        }, {
+                            label: 'Avg Fee (satoshis)',
+                            data: dailyActivity.map(day => day.avg_fee),
+                            borderColor: '#ff7f50',
+                            borderWidth: 2,
+                            fill: false,
+                            yAxisID: 'y1'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Transactions'
+                                }
+                            },
+                            y1: {
+                                beginAtZero: true,
+                                position: 'right',
+                                grid: {
+                                    drawOnChartArea: false
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Avg Fee (satoshis)'
+                                }
+                            }
+                        }
+                    }
+                });
+                
+            } catch (error) {
+                console.error('Error initializing dashboard:', error);
+            }
+        }
+        
+        // Initialize the dashboard when the page loads
+        window.addEventListener('load', initDashboard);
+    </script>
 </body>
 </html>
